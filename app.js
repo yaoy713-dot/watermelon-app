@@ -300,7 +300,115 @@ function startDatabaseListener() {
     });
 }
 
+// Milestone computation — runs on every snapshot, no DB writes needed
+function computeMilestones(watermelons) {
+    const sorted = [...watermelons].sort((a, b) =>
+        (a.date || '').localeCompare(b.date || '')
+    );
+
+    const byEntry = new Map();
+    const allIds = new Set();
+
+    let total = 0;
+    let bothCount = 0;
+    let soloCount = 0;
+    let largeAwarded = false;
+    let smallAwarded = false;
+    const yearsSeen = new Set();
+
+    const countMilestones = {
+        1:   { emoji: '🍉',  label: 'First slice!' },
+        5:   { emoji: '🥉',  label: '5 slices!' },
+        10:  { emoji: '🥈',  label: '10 slices!' },
+        25:  { emoji: '🥇',  label: '25 slices!' },
+        50:  { emoji: '🌟',  label: '50 slices!' },
+        100: { emoji: '👑',  label: '100 slices!' }
+    };
+    const bothMilestones = {
+        5:  { emoji: '💑', label: '5 together' },
+        10: { emoji: '💖', label: '10 together' },
+        25: { emoji: '💞', label: '25 together!' }
+    };
+
+    sorted.forEach(wm => {
+        const earned = [];
+        total++;
+
+        if (countMilestones[total]) earned.push(countMilestones[total]);
+
+        const year = (wm.date || '').slice(0, 4);
+        if (year && !yearsSeen.has(year)) {
+            yearsSeen.add(year);
+            // Skip "first of year" for the very first ever entry (already gets 1st slice)
+            if (total !== 1) earned.push({ emoji: '🌷', label: `First of ${year}` });
+        }
+
+        if (wm.eatenBy === 'both') {
+            bothCount++;
+            if (bothMilestones[bothCount]) earned.push(bothMilestones[bothCount]);
+        } else {
+            soloCount++;
+            if (soloCount === 10) earned.push({ emoji: '🥷', label: 'Solo snacker x10' });
+        }
+
+        if (wm.size === 'large' && !largeAwarded) {
+            largeAwarded = true;
+            earned.push({ emoji: '💪', label: 'First giant!' });
+        }
+        if (wm.size === 'small' && !smallAwarded) {
+            smallAwarded = true;
+            earned.push({ emoji: '🌱', label: 'First snack-size' });
+        }
+
+        if (earned.length > 0) {
+            byEntry.set(wm.id, earned);
+            earned.forEach(m => allIds.add(`${wm.id}:${m.label}`));
+        }
+    });
+
+    return { byEntry, allIds };
+}
+
+let lastMilestoneIds = null;
+
+function showMilestoneToast(milestone, index) {
+    setTimeout(() => {
+        const toast = document.createElement('div');
+        toast.className = 'milestone-toast';
+        toast.innerHTML = `
+            <div class="milestone-toast-emoji">${milestone.emoji}</div>
+            <div class="milestone-toast-text">
+                <strong>Milestone unlocked!</strong>
+                <p>${escapeHTML(milestone.label)}</p>
+            </div>
+        `;
+        document.body.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('milestone-toast-visible'));
+        setTimeout(() => {
+            toast.classList.remove('milestone-toast-visible');
+            setTimeout(() => toast.remove(), 400);
+        }, 4200);
+    }, index * 600);
+}
+
 function renderFeed(watermelons) {
+    const { byEntry: milestonesByEntry, allIds: currentMilestoneIds } = computeMilestones(watermelons);
+
+    // Detect newly unlocked milestones (skip on first load to avoid toast spam)
+    if (lastMilestoneIds !== null) {
+        const newOnes = [];
+        currentMilestoneIds.forEach(id => {
+            if (!lastMilestoneIds.has(id)) {
+                const [entryId, ...labelParts] = id.split(':');
+                const label = labelParts.join(':');
+                const m = milestonesByEntry.get(entryId)?.find(x => x.label === label);
+                if (m) newOnes.push(m);
+            }
+        });
+        newOnes.forEach((m, i) => showMilestoneToast(m, i));
+    }
+    lastMilestoneIds = currentMilestoneIds;
+
     if (watermelons.length === 0) {
         feedContainer.innerHTML = `
             <div class="loading-state">
@@ -376,10 +484,18 @@ function renderFeed(watermelons) {
             `;
         }
 
+        const milestones = milestonesByEntry.get(wm.id) || [];
+        const milestonesHTML = milestones.length
+            ? `<div class="wm-milestones">${milestones
+                .map(m => `<span class="wm-milestone-badge"><span class="wm-milestone-emoji">${m.emoji}</span> ${escapeHTML(m.label)}</span>`)
+                .join('')}</div>`
+            : '';
+
         card.innerHTML = `
             ${actionsHTML}
             ${imageHTML}
             <div class="wm-details">
+                ${milestonesHTML}
                 <div class="wm-meta">
                     <span class="wm-date">${formattedDate}</span>
                     ${relativeDate ? `<span class="wm-relative">${relativeDate}</span>` : ''}
