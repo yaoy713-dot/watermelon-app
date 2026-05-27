@@ -85,14 +85,22 @@ onAuthStateChanged(auth, (user) => {
         startDatabaseListener();
     } else {
         currentUser = null;
-        // User is signed out
         loginScreen.classList.remove('hidden');
         appContent.classList.add('hidden');
-        
+
         if (unsubscribeSnapshot) {
             unsubscribeSnapshot();
             unsubscribeSnapshot = null;
         }
+        // Reset milestone tracking and cancel any in-flight animations/toasts
+        lastMilestoneIds = null;
+        [totalCountDisplay, totalCaloriesDisplay, totalSugarDisplay].forEach(el => {
+            const f = animationFrames.get(el);
+            if (f) { cancelAnimationFrame(f); animationFrames.delete(el); }
+        });
+        pendingToastTimeouts.forEach(clearTimeout);
+        pendingToastTimeouts.length = 0;
+        document.querySelectorAll('.milestone-toast').forEach(t => t.remove());
     }
 });
 
@@ -126,7 +134,7 @@ closeModal.addEventListener('click', () => {
 });
 
 addModal.addEventListener('click', (e) => {
-    if (e.target === addModal) {
+    if (e.target === addModal && !submitBtn.disabled) {
         if (confirm("Discard your unlogged watermelon? 🍉🥺")) {
             closeModal.click();
         }
@@ -370,9 +378,11 @@ function computeMilestones(watermelons) {
 }
 
 let lastMilestoneIds = null;
+const pendingToastTimeouts = [];
 
 function showMilestoneToast(milestone, index) {
-    setTimeout(() => {
+    const tid = setTimeout(() => {
+        if (!currentUser) return;
         const toast = document.createElement('div');
         toast.className = 'milestone-toast';
         toast.innerHTML = `
@@ -389,6 +399,7 @@ function showMilestoneToast(milestone, index) {
             setTimeout(() => toast.remove(), 400);
         }, 4200);
     }, index * 600);
+    pendingToastTimeouts.push(tid);
 }
 
 function renderFeed(watermelons) {
@@ -474,8 +485,9 @@ function renderFeed(watermelons) {
             locationHTML = `<span class="wm-location">📍 ${escapeHTML(wm.location)}</span>`;
         }
 
+        const isOwner = currentUser && (!wm.userId || wm.userId === currentUser.uid);
         let actionsHTML = '';
-        if (currentUser) {
+        if (isOwner) {
             actionsHTML = `
                 <div class="wm-actions">
                     <button class="action-btn edit-btn" data-id="${wm.id}" title="Edit">✏️</button>
@@ -503,7 +515,7 @@ function renderFeed(watermelons) {
                 </div>
                 ${badgesHTML ? `<div class="wm-badges">${badgesHTML}</div>` : ''}
                 ${locationHTML}
-                ${wm.notes && wm.notes.trim() ? `<p class="wm-notes">${escapeHTML(wm.notes)}</p>` : ''}
+                ${typeof wm.notes === 'string' && wm.notes.trim() ? `<p class="wm-notes">${escapeHTML(wm.notes)}</p>` : ''}
             </div>
         `;
 
@@ -513,15 +525,16 @@ function renderFeed(watermelons) {
         }
         feedContainer.appendChild(card);
         
-        if (currentUser) {
+        if (isOwner) {
             const editBtn = card.querySelector('.edit-btn');
             const delBtn = card.querySelector('.del-btn');
+            const validSizes = ['standard', 'small', 'large', 'cup'];
             if (editBtn) {
                 editBtn.addEventListener('click', () => {
                     resetModalState();
                     document.getElementById('editId').value = wm.id;
                     document.getElementById('dateInput').value = wm.date;
-                    document.getElementById('sizeInput').value = wm.size || 'standard';
+                    document.getElementById('sizeInput').value = validSizes.includes(wm.size) ? wm.size : 'standard';
                     document.getElementById('portionInput').value = wm.portion !== undefined ? wm.portion : 1.0;
                     document.getElementById('locationInput').value = wm.location || '';
                     document.getElementById('notesInput').value = wm.notes || '';
@@ -563,7 +576,7 @@ function updateStats(watermelons) {
 
     watermelons.forEach(wm => {
         let size = wm.size || 'standard';
-        let portion = wm.portion !== undefined ? wm.portion : 1.0;
+        let portion = Number.isFinite(wm.portion) ? wm.portion : 1.0;
 
         let baseCal = 2500;
         let baseSugar = 550;
@@ -625,10 +638,11 @@ function animateValue(obj, start, end, duration, suffix = '') {
 
 function formatRelativeDate(date) {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
     const target = new Date(date);
-    target.setHours(0, 0, 0, 0);
-    const days = Math.round((today - target) / (1000 * 60 * 60 * 24));
+    // Use UTC midnight of both dates to avoid DST drift breaking day counts
+    const t = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const d = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+    const days = Math.round((t - d) / (1000 * 60 * 60 * 24));
     if (days === 0) return 'today';
     if (days === 1) return 'yesterday';
     if (days === -1) return 'tomorrow';
@@ -664,10 +678,10 @@ function openLightbox(src) {
     const close = () => {
         overlay.classList.add('lightbox-closing');
         setTimeout(() => overlay.remove(), 200);
-        document.removeEventListener('keydown', onKey);
     };
-    const onKey = (e) => { if (e.key === 'Escape') close(); };
     overlay.addEventListener('click', close);
-    document.addEventListener('keydown', onKey);
+    overlay.tabIndex = -1;
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
     document.body.appendChild(overlay);
+    overlay.focus();
 }
