@@ -91,7 +91,22 @@ onAuthStateChanged(auth, (user) => {
 
 
 // Modal Logic
+function resetModalState() {
+    addForm.reset();
+    document.getElementById('editId').value = '';
+    imagePreview.classList.add('hidden');
+    imagePreview.removeAttribute('src');
+    imagePreview.style.display = '';
+    fileNameDisplay.textContent = '📸 Tap to snap a photo!';
+    selectedFile = null;
+    submitText.textContent = 'Log it! 🍉';
+    submitText.classList.remove('hidden');
+    submitLoading.classList.add('hidden');
+    submitBtn.disabled = false;
+}
+
 fabAdd.addEventListener('click', () => {
+    resetModalState();
     addModal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     document.getElementById('dateInput').valueAsDate = new Date();
@@ -100,10 +115,7 @@ fabAdd.addEventListener('click', () => {
 closeModal.addEventListener('click', () => {
     addModal.classList.add('hidden');
     document.body.style.overflow = 'auto';
-    addForm.reset();
-    imagePreview.classList.add('hidden');
-    fileNameDisplay.textContent = '📸 Tap to snap a photo!';
-    selectedFile = null;
+    resetModalState();
 });
 
 addModal.addEventListener('click', (e) => {
@@ -116,19 +128,60 @@ addModal.addEventListener('click', (e) => {
 
 // Image Preview Logic
 let selectedFile = null;
+const MAX_IMAGE_DIMENSION = 1600;
+const COMPRESSION_QUALITY = 0.82;
+
+async function compressImage(file) {
+    if (!file.type.startsWith('image/')) return file;
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            let { width, height } = img;
+            if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+                const scale = MAX_IMAGE_DIMENSION / Math.max(width, height);
+                width = Math.round(width * scale);
+                height = Math.round(height * scale);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            canvas.toBlob(
+                (blob) => blob ? resolve(blob) : reject(new Error('Compression failed')),
+                'image/jpeg',
+                COMPRESSION_QUALITY
+            );
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Could not read image'));
+        };
+        img.src = url;
+    });
+}
 
 photoInput.addEventListener('change', (e) => {
-    if (e.target.files && e.target.files[0]) {
-        selectedFile = e.target.files[0];
-        fileNameDisplay.textContent = selectedFile.name;
-        
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            imagePreview.src = e.target.result;
-            imagePreview.classList.remove('hidden');
-        };
-        reader.readAsDataURL(selectedFile);
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+
+    if (!file.type.startsWith('image/')) {
+        alert('Please pick an image file 🍉');
+        photoInput.value = '';
+        return;
     }
+
+    selectedFile = file;
+    fileNameDisplay.textContent = file.name;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        imagePreview.src = ev.target.result;
+        imagePreview.style.display = '';
+        imagePreview.classList.remove('hidden');
+    };
+    reader.readAsDataURL(file);
 });
 
 // Form Submission
@@ -153,8 +206,23 @@ addForm.addEventListener('submit', async (e) => {
 
         // Upload image if exists
         if (selectedFile) {
-            const fileRef = ref(storage, `watermelons/${Date.now()}_${selectedFile.name}`);
-            await uploadBytes(fileRef, selectedFile);
+            submitText.textContent = 'Uploading photo... 📸';
+            submitText.classList.remove('hidden');
+            submitLoading.classList.add('hidden');
+
+            let blobToUpload = selectedFile;
+            try {
+                blobToUpload = await compressImage(selectedFile);
+            } catch (compressErr) {
+                console.warn('Compression failed, uploading original:', compressErr);
+            }
+
+            const safeName = (selectedFile.name || 'photo.jpg')
+                .replace(/[^a-zA-Z0-9._-]/g, '_')
+                .slice(-50);
+            const fileRef = ref(storage, `watermelons/${currentUser.uid}/${Date.now()}_${safeName}`);
+            const metadata = { contentType: blobToUpload.type || 'image/jpeg' };
+            await uploadBytes(fileRef, blobToUpload, metadata);
             imageUrl = await getDownloadURL(fileRef);
         }
 
@@ -185,8 +253,16 @@ addForm.addEventListener('submit', async (e) => {
         // Close modal and reset
         closeModal.click();
     } catch (error) {
-        console.error("Error adding document: ", error);
-        alert("Failed to save watermelon! " + error.message);
+        console.error("Error saving watermelon: ", error);
+        let msg = error.message || 'Something went wrong.';
+        if (error.code === 'storage/unauthorized') {
+            msg = "Couldn't upload photo — Firebase Storage rules are blocking writes. Deploy storage.rules to fix.";
+        } else if (error.code === 'storage/canceled') {
+            msg = 'Photo upload was canceled.';
+        } else if (error.code === 'storage/retry-limit-exceeded') {
+            msg = 'Photo upload timed out. Check your connection and try again.';
+        }
+        alert("Failed to save: " + msg);
     } finally {
         submitBtn.disabled = false;
         submitText.classList.remove('hidden');
@@ -298,6 +374,7 @@ function renderFeed(watermelons) {
             const delBtn = card.querySelector('.del-btn');
             if (editBtn) {
                 editBtn.addEventListener('click', () => {
+                    resetModalState();
                     document.getElementById('editId').value = wm.id;
                     document.getElementById('dateInput').value = wm.date;
                     document.getElementById('sizeInput').value = wm.size || 'standard';
@@ -305,22 +382,16 @@ function renderFeed(watermelons) {
                     document.getElementById('locationInput').value = wm.location || '';
                     document.getElementById('notesInput').value = wm.notes || '';
                     document.getElementById('bothCheckbox').checked = wm.eatenBy !== 'solo';
-                    document.getElementById('submitBtn').innerHTML = 'Update it! <span class="btn-icon">✨</span>';
-                    
-                    selectedFile = null;
+                    submitText.textContent = 'Update it! ✨';
+
                     if (wm.imageUrl) {
                         imagePreview.src = wm.imageUrl;
-                        imagePreview.style.display = 'block';
+                        imagePreview.classList.remove('hidden');
                         fileNameDisplay.textContent = 'Keeping existing photo';
-                    } else {
-                        imagePreview.style.display = 'none';
-                        fileNameDisplay.textContent = '📸 Tap to snap a photo!';
                     }
 
                     addModal.classList.remove('hidden');
-                    setTimeout(() => {
-                        addModal.querySelector('.modal-content').style.transform = 'translateY(0)';
-                    }, 10);
+                    document.body.style.overflow = 'hidden';
                 });
             }
             if (delBtn) {
