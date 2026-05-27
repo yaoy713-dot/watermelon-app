@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "love-people"
+  },
+  "targets": {
+    "love-people": {
+      "hosting": {
+        "watermelon": [
+          "608-watermelons"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

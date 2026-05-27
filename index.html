@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watermelon Tracker 🍉</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Korean Cute Font: Jua -->
+    <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+    
+    <!-- Firebase SDK via CDN -->
+    <script type="module" src="app.js"></script>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="full-screen-center">
+        <div class="login-card glass-panel">
+            <div class="login-icon">🍉</div>
+            <h1>Watermelon Tracker</h1>
+            <p>Welcome! Please sign in to sync with Gwynevere.</p>
+            <button id="loginBtn" class="btn-primary login-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="20" height="20" style="margin-right: 10px; flex-shrink: 0;">
+                    <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
+                    <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,19.001,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/>
+                    <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
+                    <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
+                </svg>
+                Sign in with Google
+            </button>
+        </div>
+    </div>
+
+    <!-- Main App Content (Hidden until logged in) -->
+    <div id="appContent" class="app-container hidden">
+        <!-- Header / Dashboard -->
+        <header class="glass-panel main-header">
+            <div class="header-content">
+                <div class="title-area">
+                    <h1>Watermelon Tracker</h1>
+                    <p class="subtitle" id="userGreeting">Shared with Gwynevere</p>
+                </div>
+                <div class="stats-area">
+                    <div class="stat-box">
+                        <span class="stat-label">Total Logs</span>
+                        <span class="stat-value" id="totalCount">0</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">Est. Cals</span>
+                        <span class="stat-value" id="totalCalories">0</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">Sugar</span>
+                        <span class="stat-value" id="totalSugar">0g</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="percentile-banner">
+                <div class="percentile-icon">✨</div>
+                <div class="percentile-text">
+                    <strong>Global Percentile</strong>
+                    <p id="percentileText">Loading stats...</p>
+                </div>
+            </div>
+            <button id="logoutBtn" class="icon-button logout-btn" title="Sign Out">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+        </header>
+
+        <!-- Feed Area -->
+        <main>
+            <div class="feed-header">
+                <h2>Our Recent Slices 🍉</h2>
+            </div>
+            <div id="feedContainer" class="feed-grid">
+                <!-- Watermelon cards will be injected here -->
+                <div class="loading-state">
+                    <div class="bounce-emoji">🍉</div>
+                    <p>Loading sweet slices...</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Floating Action Button -->
+        <button id="fabAdd" class="fab">
+            +
+        </button>
+    </div>
+
+    <!-- Add Modal -->
+    <div id="addModal" class="modal-overlay hidden">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h2>Log a Watermelon ✨</h2>
+                <button id="closeModal" class="icon-button">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <form id="addForm">
+                <input type="hidden" id="editId" value="">
+                <div class="form-group">
+                    <label for="dateInput">When did you get it?</label>
+                    <input type="date" id="dateInput" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="sizeInput">How big was it?</label>
+                    <select id="sizeInput" required>
+                        <option value="standard">Standard (Normal Size)</option>
+                        <option value="small">Small (Personal Size)</option>
+                        <option value="large">Large (Extra Big)</option>
+                        <option value="cup">One Cup (Snack Size)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="portionInput">How much did you & Gwynevere eat?</label>
+                    <select id="portionInput" required>
+                        <option value="1">100% (Just us)</option>
+                        <option value="0.75">75% (Mostly us)</option>
+                        <option value="0.5">50% (Shared half with friends)</option>
+                        <option value="0.25">25% (Community Group / Party)</option>
+                        <option value="0.1">10% (Just a taste)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="locationInput">Location / Context (Optional)</label>
+                    <input type="text" id="locationInput" placeholder="e.g. Carmel with CG">
+                </div>
+
+                <div class="form-group checkbox-group">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="bothCheckbox" checked>
+                        Both Gwynevere and I ate this
+                    </label>
+                </div>
+                
+                <div class="form-group">
+                    <label for="photoInput">Picture (Optional)</label>
+                    <div class="file-upload-wrapper">
+                        <input type="file" id="photoInput" accept="image/*">
+                        <div class="file-upload-visual">
+                            <span id="fileName">📸 Tap to snap a photo!</span>
+                        </div>
+                    </div>
+                    <!-- Image Preview -->
+                    <img id="imagePreview" class="hidden" alt="Preview">
+                </div>
+
+                <div class="form-group">
+                    <label for="notesInput">Notes / Rating</label>
+                    <textarea id="notesInput" placeholder="Was it super sweet? 🍉" rows="3"></textarea>
+                </div>
+
+                <button type="submit" class="btn-primary" id="submitBtn">
+                    <span id="submitText">Log it! 🍉</span>
+                    <span id="submitLoading" class="hidden">Saving... ✨</span>
+                </button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
