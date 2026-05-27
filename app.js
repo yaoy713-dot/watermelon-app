@@ -48,6 +48,7 @@ let currentUser = null;
 
 // Auth Logic
 const provider = new GoogleAuthProvider();
+const ALLOWED_EMAILS = ['yaoy713@gmail.com', 'gwynevere.hunger@gmail.com'];
 
 loginBtn.addEventListener('click', async () => {
     if (loginBtn.disabled) return;
@@ -72,16 +73,19 @@ logoutBtn.addEventListener('click', async () => {
     }
 });
 
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
     if (user) {
+        if (!ALLOWED_EMAILS.includes((user.email || '').toLowerCase())) {
+            await signOut(auth);
+            alert("This watermelon tracker is private 🍉🥺");
+            return;
+        }
         currentUser = user;
-        // User is signed in
         loginScreen.classList.add('hidden');
         appContent.classList.remove('hidden');
         const firstName = (user.displayName || user.email || 'friend').split(' ')[0];
         userGreeting.textContent = `Hi ${firstName}!`;
-        
-        // Start listening to database
+
         startDatabaseListener();
     } else {
         currentUser = null;
