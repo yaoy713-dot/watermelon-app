@@ -50,11 +50,17 @@ let currentUser = null;
 const provider = new GoogleAuthProvider();
 
 loginBtn.addEventListener('click', async () => {
+    if (loginBtn.disabled) return;
+    loginBtn.disabled = true;
     try {
         await signInWithPopup(auth, provider);
     } catch (error) {
         console.error("Login failed", error);
-        alert("Login failed! " + error.message);
+        if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
+            alert("Login failed! " + error.message);
+        }
+    } finally {
+        loginBtn.disabled = false;
     }
 });
 
@@ -72,7 +78,8 @@ onAuthStateChanged(auth, (user) => {
         // User is signed in
         loginScreen.classList.add('hidden');
         appContent.classList.remove('hidden');
-        userGreeting.textContent = `Hi ${user.displayName.split(' ')[0]}!`;
+        const firstName = (user.displayName || user.email || 'friend').split(' ')[0];
+        userGreeting.textContent = `Hi ${firstName}!`;
         
         // Start listening to database
         startDatabaseListener();
@@ -123,6 +130,12 @@ addModal.addEventListener('click', (e) => {
         if (confirm("Discard your unlogged watermelon? 🍉🥺")) {
             closeModal.click();
         }
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !addModal.classList.contains('hidden')) {
+        closeModal.click();
     }
 });
 
@@ -245,9 +258,10 @@ addForm.addEventListener('submit', async (e) => {
             await updateDoc(doc(db, "watermelons", editId), wmObj);
         } else {
             wmObj.createdAt = new Date();
-            wmObj.addedBy = currentUser.displayName;
+            wmObj.addedBy = currentUser.displayName || currentUser.email || 'Someone';
             wmObj.userId = currentUser.uid;
             await addDoc(collection(db, "watermelons"), wmObj);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         // Close modal and reset
@@ -301,17 +315,25 @@ function renderFeed(watermelons) {
         const card = document.createElement('div');
         card.className = 'wm-card glass-panel';
         
-        // Format date nicely
-        const dateObj = new Date(wm.date);
-        const formattedDate = new Date(dateObj.getTime() + Math.abs(dateObj.getTimezoneOffset() * 60000)).toLocaleDateString('en-US', {
+        // Parse YYYY-MM-DD as a local date (avoid UTC drift)
+        const [y, m, d] = (wm.date || '').split('-').map(Number);
+        const dateObj = (y && m && d) ? new Date(y, m - 1, d) : new Date();
+        const formattedDate = dateObj.toLocaleDateString('en-US', {
             month: 'short', day: 'numeric', year: 'numeric'
         });
+        const relativeDate = formatRelativeDate(dateObj);
 
         let imageHTML = '';
         if (wm.imageUrl) {
             imageHTML = `
                 <div class="wm-image-container">
-                    <img src="${wm.imageUrl}" alt="Watermelon slice" loading="lazy">
+                    <img src="${escapeHTML(wm.imageUrl)}" alt="Watermelon slice" loading="lazy" data-zoom="1">
+                </div>
+            `;
+        } else {
+            imageHTML = `
+                <div class="wm-image-container wm-image-placeholder">
+                    <span class="wm-no-image">🍉</span>
                 </div>
             `;
         }
@@ -360,13 +382,19 @@ function renderFeed(watermelons) {
             <div class="wm-details">
                 <div class="wm-meta">
                     <span class="wm-date">${formattedDate}</span>
-                    <span class="wm-author">by ${authorName}</span>
+                    ${relativeDate ? `<span class="wm-relative">${relativeDate}</span>` : ''}
+                    <span class="wm-author">by ${escapeHTML(authorName)}</span>
                 </div>
                 ${badgesHTML ? `<div class="wm-badges">${badgesHTML}</div>` : ''}
                 ${locationHTML}
-                ${wm.notes ? `<p class="wm-notes">${escapeHTML(wm.notes)}</p>` : ''}
+                ${wm.notes && wm.notes.trim() ? `<p class="wm-notes">${escapeHTML(wm.notes)}</p>` : ''}
             </div>
         `;
+
+        const zoomImg = card.querySelector('img[data-zoom]');
+        if (zoomImg) {
+            zoomImg.addEventListener('click', () => openLightbox(zoomImg.src));
+        }
         feedContainer.appendChild(card);
         
         if (currentUser) {
@@ -412,18 +440,18 @@ function renderFeed(watermelons) {
 
 function updateStats(watermelons) {
     const count = watermelons.length;
-    animateValue(totalCountDisplay, parseInt(totalCountDisplay.textContent) || 0, count, 1000);
-    
+    animateValue(totalCountDisplay, parseInt(totalCountDisplay.textContent, 10) || 0, count, 1000);
+
     let totalCals = 0;
     let totalSugars = 0;
 
     watermelons.forEach(wm => {
         let size = wm.size || 'standard';
         let portion = wm.portion !== undefined ? wm.portion : 1.0;
-        
+
         let baseCal = 2500;
         let baseSugar = 550;
-        
+
         if (size === 'small') {
             baseCal = 650;
             baseSugar = 140;
@@ -439,9 +467,9 @@ function updateStats(watermelons) {
         totalSugars += (baseSugar * portion);
     });
 
-    animateValue(totalCaloriesDisplay, parseInt(totalCaloriesDisplay.textContent) || 0, Math.round(totalCals), 1000);
-    animateValueWithSuffix(totalSugarDisplay, parseInt(totalSugarDisplay.textContent) || 0, Math.round(totalSugars), 1000, 'g');
-    
+    animateValue(totalCaloriesDisplay, parseInt(totalCaloriesDisplay.textContent, 10) || 0, Math.round(totalCals), 1000);
+    animateValue(totalSugarDisplay, parseInt(totalSugarDisplay.textContent, 10) || 0, Math.round(totalSugars), 1000, 'g');
+
     let percentile = 0;
     if (count === 0) percentile = 10;
     else if (count < 3) percentile = 30;
@@ -451,45 +479,54 @@ function updateStats(watermelons) {
     else percentile = 99;
 
     if (count === 0) {
-        percentileTextDisplay.innerHTML = "Eat a slice to join the rankings! ✨";
+        percentileTextDisplay.textContent = "Eat a slice to join the rankings! ✨";
     } else {
         percentileTextDisplay.innerHTML = `You beat <strong>${percentile}%</strong> of humanity!`;
     }
 }
 
-// Utility to animate numbers with a suffix
-function animateValueWithSuffix(obj, start, end, duration, suffix) {
+// Track active animation frames so rapid updates don't stack
+const animationFrames = new WeakMap();
+
+function animateValue(obj, start, end, duration, suffix = '') {
+    const prev = animationFrames.get(obj);
+    if (prev) cancelAnimationFrame(prev);
+
     let startTimestamp = null;
     const step = (timestamp) => {
         if (!startTimestamp) startTimestamp = timestamp;
         const progress = Math.min((timestamp - startTimestamp) / duration, 1);
         const easeProgress = 1 - Math.pow(1 - progress, 3);
-        obj.innerHTML = Math.floor(easeProgress * (end - start) + start) + suffix;
+        obj.textContent = Math.floor(easeProgress * (end - start) + start) + suffix;
         if (progress < 1) {
-            window.requestAnimationFrame(step);
+            animationFrames.set(obj, requestAnimationFrame(step));
+        } else {
+            animationFrames.delete(obj);
         }
     };
-    window.requestAnimationFrame(step);
+    animationFrames.set(obj, requestAnimationFrame(step));
 }
 
-// Utility to animate numbers
-function animateValue(obj, start, end, duration) {
-    let startTimestamp = null;
-    const step = (timestamp) => {
-        if (!startTimestamp) startTimestamp = timestamp;
-        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-        const easeProgress = 1 - Math.pow(1 - progress, 3);
-        obj.innerHTML = Math.floor(easeProgress * (end - start) + start);
-        if (progress < 1) {
-            window.requestAnimationFrame(step);
-        }
-    };
-    window.requestAnimationFrame(step);
+function formatRelativeDate(date) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(date);
+    target.setHours(0, 0, 0, 0);
+    const days = Math.round((today - target) / (1000 * 60 * 60 * 24));
+    if (days === 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days === -1) return 'tomorrow';
+    if (days > 1 && days < 7) return `${days} days ago`;
+    if (days < -1 && days > -7) return `in ${-days} days`;
+    if (days >= 7 && days < 30) return `${Math.floor(days / 7)}w ago`;
+    if (days >= 30 && days < 365) return `${Math.floor(days / 30)}mo ago`;
+    if (days >= 365) return `${Math.floor(days / 365)}y ago`;
+    return '';
 }
 
 // Utility to escape HTML and prevent XSS
 function escapeHTML(str) {
-    return str.replace(/[&<>'"]/g, 
+    return String(str ?? '').replace(/[&<>'"]/g,
         tag => ({
             '&': '&amp;',
             '<': '&lt;',
@@ -498,4 +535,23 @@ function escapeHTML(str) {
             '"': '&quot;'
         }[tag])
     );
+}
+
+// Lightbox for full-size photo viewing
+function openLightbox(src) {
+    const overlay = document.createElement('div');
+    overlay.className = 'lightbox-overlay';
+    overlay.innerHTML = `
+        <button class="lightbox-close" aria-label="Close">×</button>
+        <img src="${escapeHTML(src)}" alt="Watermelon photo">
+    `;
+    const close = () => {
+        overlay.classList.add('lightbox-closing');
+        setTimeout(() => overlay.remove(), 200);
+        document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    overlay.addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
 }
